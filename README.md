@@ -17,7 +17,7 @@ Collect the keys and the id of tuya devices according to [@Codetheweb method](ht
 
 ## Reliability
 
-I have done my best to get the Neo devices that I have, work properly but it happens that a set command does not succeed. 
+The Neo devices I use (Tuya clone) behave as expected most of the time but I have experienced some random crash during development.
 
 ## Usage
 Get the API `go get "github.com/py60800/tuya"`
@@ -46,7 +46,10 @@ Check type and cast to get active interface ` sw1  := b1.(tuya.Switch)`
 
 Play with the device :
 
-`sw1.Set(true)`
+`sw1.Set(true)`  // doesn't wait for the result of the command
+
+`sw1.SetW(5*time.Second)`  // ensure the command is properly done
+
 
 `st,_ := sw1.Status()`
 
@@ -57,14 +60,16 @@ IP addresses are collected automatically from UDP messages broadcast on port 666
 
 API is supposed to be thread safe (I hope). A device can be used by concurrent go coroutines however communication with each device are serialized (no more than one TCP connection)
 
-the API is synchroneous however it is safe to make it asynchroneous (i.e `go sw1.Set(true)` for a fire and forget usage). 
+Communication with Tuya device is asynchronous. This means that tuya device can notify a change if someone plays with the hardware switch. Naive implement may encounters issues while a expecting one request for each response.
+
 
 # Extension
 Looking at switch.go source code, it should be easy to create new devices using the same protocol.
 
 Just define appropriate interface, code what is specific in a dedicated file and update the factory to make it usable.
 
-# Complains
+# Notes
+
 
 I have found many oddities in tuya protocol:
 
@@ -78,9 +83,6 @@ I have found many oddities in tuya protocol:
 
 - Worthless base64 encoding
 
-- Randomly encrypted responses
-
 - Protocol not properly layered (command outside payload)
 
 By many aspects, it seems that the protocol was designed for serial line communication.
-Tuya guys should seriously consider refactoring their protocol (Perhaps is it on the way)

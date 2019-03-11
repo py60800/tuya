@@ -1,4 +1,4 @@
-// Copyright 2019 py60800. 
+// Copyright 2019 py60800.
 // Use of this source code is governed by Apache-2 licence
 // license that can be found in the LICENSE file.
 
@@ -8,9 +8,12 @@ import (
    "encoding/json"
    "fmt"
    "io"
+   "log"
    "net"
+   "sync/atomic"
    "time"
 )
+
 // helpers
 func ui2b(v uint, n int) []byte {
    b := make([]byte, n)
@@ -29,62 +32,113 @@ func uiRd(b []byte) uint {
    }
    return r
 }
-func (a *Appliance) getCnx() (net.Conn, error){
-   // Get an IP
-   a.cnxMutex.Lock()
-   for len(a.Ip) == 0 {
-      a.cnxSignal.Wait()
+
+type response struct {
+   err  error
+   data []byte
+}
+type query struct {
+   cmd  int
+   data []byte
+}
+
+const (
+   cnxClean = iota
+   cnxDirty
+)
+
+func (a *Appliance) tcpReceiver(cnx net.Conn, ccmd chan int) {
+   var bye = func() {
+      ccmd <- 0
    }
-   addr := a.Ip+":6668"
-   if a.cnxStatus == 4 {
-      a.cnx.Close()
-      a.cnxStatus = 0
+   defer bye()
+   var err error
+   for {
+      header := make([]byte, 4*4)
+      if _, err = io.ReadFull(cnx, header); err != nil {
+         log.Println("Rcv error:", err)
+         return
+      }
+      if int(uiRd(header)) != 0x55aa {
+         log.Println("Sync error:", err)
+         return
+      }
+      code := int(uiRd(header[8:]))
+      sz := int(uiRd(header[12:]))
+      if sz > 10000 {
+         log.Println("Dubious big response")
+         return
+      }
+      response := make([]byte, sz)
+      if _, err = io.ReadFull(cnx, response); err != nil {
+         log.Println("Read failed", err)
+         return
+      }
+      a.processResponse(code, response[:sz-8])
    }
-   switch a.cnxStatus {
-      case 0:
-         cnx, err := net.DialTimeout("tcp", addr, time.Second*5)
-         if err != nil {
-             a.cnxMutex.Unlock()
-             return cnx,err
+}
+
+func (a *Appliance) tcpConnManager(c chan query) {
+   var cnx net.Conn
+   var err error
+   var addr string
+   rcvFailed := make(chan int)
+   for {
+      // Wait for some order
+      var q query
+   loop:
+      for {
+         select {
+         case <-rcvFailed:
+            cnx.Close()
+            cnx = nil
+         case q = <-c:
+            break loop
          }
-         a.cnxStatus = 1 // dirty
-         a.cnx = cnx
-         return a.cnx, nil // mutex still locked
-     case 2: // connexion clean
-         a.cnxStatus = 1 // dirty
-         return a.cnx, nil
-     default:
-         panic("Cnx Handling error")
+      }
+   sendloop:
+      for trial := 0; trial < 3; trial++ {
+         for ctrial := 0; cnx == nil && ctrial < 3; ctrial++ {
+            // get IP (that can change)
+            a.cnxMutex.Lock()
+            for len(a.Ip) == 0 {
+               a.cnxSignal.Wait()
+            }
+            addr = a.Ip + ":6668"
+            a.cnxMutex.Unlock()
+            cnx, err = net.DialTimeout("tcp", addr, time.Second*5)
+            if err == nil {
+               go a.tcpReceiver(cnx, rcvFailed)
+               break
+            } else {
+               time.Sleep(3 * time.Second)
+               cnx = nil
+            }
+         }
+         if cnx == nil {
+            log.Println("Connection to <%v> failed ", err)
+            break sendloop
+         }
+         err = tcpSend(cnx, q.cmd, q.data)
+         if err != nil {
+            cnx.Close()
+            <-rcvFailed
+            cnx = nil
+         } else {
+            //Success!
+            break sendloop
+         }
+      }
    }
-   panic("Cnx Error")
-   return nil,nil
 }
-func (a *Appliance) releaseCnx(){
-   if a.cnxStatus != 2 {
-      a.cnx.Close()
-      a.cnxStatus = 0
-   }
-  a.cnxMutex.Unlock()
-}
-func (a *Appliance) setCnxClean(){
-   a.cnxStatus = 2
-}
-func (a *Appliance) resetCnx(){
-   a.cnxStatus = 4
-}
-// sends a message over TCP and waits for the response
-func (a *Appliance)tcpSendRcv(cmd int, data []byte) ([]byte, error) {
-  // No more than one connection at a time
-   cnx,err := a.getCnx();
-   if err != nil {
-       return []byte{},err
-   }
-   defer a.releaseCnx()
-   
+
+// sends a message over TCP
+
+func tcpSend(cnx net.Conn, cmd int, data []byte) error {
    // simple appliances are expected to reply quickly
    now := time.Now()
    cnx.SetWriteDeadline(now.Add(5 * time.Second))
-   cnx.SetReadDeadline(now.Add(5 * time.Second))
+   //   cnx.SetReadDeadline(now.Add(5 * time.Second))
 
    // tuya appliances cannot handle multiple read!!
    // => fill a buffer and write it
@@ -95,27 +149,11 @@ func (a *Appliance)tcpSendRcv(cmd int, data []byte) ([]byte, error) {
    b = append(b, data...)
    b = append(b, ui2b(uint(0xaa55), 8)...)
    if _, err := cnx.Write(b); err != nil {
-      return []byte{}, err
+      return err
    }
-
-   // Message has been sent, try to get a response
-   header := make([]byte, 4*4)
-   if _, err := io.ReadFull(cnx, header); err != nil {
-      return []byte{}, err
-   }
-   // who cares of the header ?
-   sz := int(uiRd(header[12:]))
-   if sz > 10000 { 
-      return []byte{}, fmt.Errorf("Dubious big response")
-   }
-   response := make([]byte, sz)
-   if _, err := io.ReadFull(cnx, response); err != nil {
-      return []byte{}, err
-   }
-   //ignore crc and end marker
-   a.setCnxClean()
-   return response[:sz-8], nil
+   return nil
 }
+
 // create base messages
 func (d *Appliance) makeBaseMsg() map[string]interface{} {
    d.mutex.RLock()
@@ -131,47 +169,40 @@ func (d *Appliance) makeStatusMsg() map[string]interface{} {
    defer d.mutex.RUnlock()
    return map[string]interface{}{"gwId": d.GwId, "devId": d.GwId}
 }
+
 // -------------------------------
-func (d *Appliance) SendEncryptedCommand(cmd int, jdata interface{}) (map[string]interface{}, error) {
-   resp := make(map[string]interface{})
+func (d *Appliance) SendEncryptedCommand(cmd int, jdata interface{}) error {
    d.mutex.RLock()
    data, er1 := json.Marshal(jdata)
    if er1 != nil {
       d.mutex.RUnlock()
-      return resp, fmt.Errorf("Json Marshal (%v)", er1)
+      return fmt.Errorf("Json Marshal (%v)", er1)
    }
    cipherText, er2 := aesEncrypt(data, d.key)
    if er2 != nil {
       d.mutex.RUnlock()
-      return resp, fmt.Errorf("Encrypt error(%v)", er2)
+      return fmt.Errorf("Encrypt error(%v)", er2)
    }
    sig := md5Sign(cipherText, d.key, d.Version)
    b := make([]byte, 0, len(sig)+len(d.Version)+len(cipherText))
    b = append(b, []byte(d.Version)...)
    b = append(b, sig...)
    b = append(b, cipherText...)
-   d.mutex.RUnlock() 
-   r, err := d.tcpSendRcv(cmd, b)
-   d.mutex.RLock()
-   defer d.mutex.RUnlock()
-   if err != nil {
-      return resp, err
-   }
-   resp, erf := d.processResponse(r,cmd)
-   return resp, erf
+   d.mutex.RUnlock()
+
+   d.tcpChan <- query{cmd, b}
+   return nil
 }
 
-func (d *Appliance) processResponse(b []byte,cmd int) (map[string]interface{}, error) {
-   //dump("Response:",b)
-   resp := make(map[string]interface{})
-   // discard leading 0
+func (d *Appliance) processResponse(code int, b []byte) {
    var i int
    for i = 0; i < len(b) && b[i] == byte(0); i++ {
    }
    b = b[i:]
    if len(b) == 0 {
-      //empty response
-      return resp, nil
+      // can be an Ack
+      d.device.ProcessResponse(code, b)
+      return
    } // empty
    var data []byte
    if b[0] == byte('{') {
@@ -188,33 +219,50 @@ func (d *Appliance) processResponse(b []byte,cmd int) (map[string]interface{}, e
       }
       if !encrypted {
          // can be an error message
-         fmt.Println("Resp:",cmd, string(b))
-         return resp, fmt.Errorf("Unexpected response(%v)", string(b))
+         log.Println("Resp:", code, string(b))
+         return
       }
       var err error
       data, err = aesDecrypt(b[len(d.Version)+16:], d.key) // ignore signature
       if err != nil {
-         return resp, err
+         log.Println("Decrypt error")
+         return
       }
    }
-   //fmt.Println("Data:",string(data))   
-   erf := json.Unmarshal(data, &resp)
-   //fmt.Println(erf,resp)
-   return resp, erf
+   d.device.ProcessResponse(code, data)
 }
+
 // Send message unencrypted
-func (d *Appliance) SendCommand(cmd int, jdata interface{}) (map[string]interface{}, error) {
-   resp := make(map[string]interface{})// default response
+func (d *Appliance) SendCommand(cmd int, jdata interface{}) error {
    data, er1 := json.Marshal(jdata)
    if er1 != nil {
-      return resp, fmt.Errorf("Json Marshal(%v)", er1)
+      return fmt.Errorf("Json Marshal(%v)", er1)
    }
-   r, er2 := d.tcpSendRcv(cmd, data)
-   d.mutex.RLock()
-   defer d.mutex.RUnlock()
-   if er2 != nil {
-      return resp, er2
+   d.tcpChan <- query{cmd, data}
+   return nil
+}
+
+// Sync mehton
+var chanRef = int64(0)
+
+func (a *Appliance) getSyncChannel() (int64, chan int) {
+   a.cnxMutex.Lock()
+   c := make(chan int, 1)
+   k := atomic.AddInt64(&chanRef, 1)
+   a.syncChannel[k] = c
+   a.cnxMutex.Unlock()
+   return k, c
+}
+func (a *Appliance) deleteSyncChannel(k int64) {
+   a.cnxMutex.Lock()
+   close(a.syncChannel[k])
+   delete(a.syncChannel, k)
+   a.cnxMutex.Unlock()
+}
+func (a *Appliance) broadcastSyncChannel(code int) {
+   a.cnxMutex.Lock()
+   for _, c := range a.syncChannel {
+      c <- code
    }
-   resp, er3 := d.processResponse(r,cmd)
-   return resp, er3
+   a.cnxMutex.Unlock()
 }

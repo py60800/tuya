@@ -1,4 +1,4 @@
-// Copyright 2019 py60800. 
+// Copyright 2019 py60800.
 // Use of this source code is governed by Apache-2 licence
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ import (
    "log"
    "sync"
    "time"
-   "net"
+   //   "net"
 )
 
 // data collected from broadcast
@@ -21,8 +21,8 @@ type pubAppliance struct {
    Ability    int
    Mode       int
    ProductKey string
-//   Version    string
-   Encrypt    bool
+   //   Version    string
+   Encrypt bool
 }
 
 type Appliance struct {
@@ -30,14 +30,15 @@ type Appliance struct {
    Version    string
    lastUpdate time.Time
    mutex      sync.RWMutex
-   // Cnx 
-   cnxStatus  int
-   cnxSignal     *sync.Cond
-   cnxMutex   sync.Mutex
-   cnx        net.Conn
+   // Cnx
+   cnxStatus   int
+   cnxSignal   *sync.Cond
+   cnxMutex    sync.Mutex
+   tcpChan     chan query
+   syncChannel map[int64]chan int
    // immutable fields
-   name     string
-   key      []byte
+   name   string
+   key    []byte
    device Device
 }
 
@@ -46,6 +47,10 @@ func newAppliance() *Appliance {
    d.cnxSignal = sync.NewCond(&d.cnxMutex)
    d.cnxStatus = 0
    d.Version = "3.1"
+   d.tcpChan = make(chan query)
+   d.syncChannel = make(map[int64]chan int)
+
+   go d.tcpConnManager(d.tcpChan)
    return d
 }
 func (d *Appliance) GetName() string {
@@ -101,7 +106,7 @@ func (dm *DeviceManager) configure(jdata string) {
       d.name = c.Name
       d.key = []byte(c.Key)
       if len(c.Ip) > 0 {
-        d.Ip = c.Ip
+         d.Ip = c.Ip
       }
       b, ok := makeDevice(c.Type)
       if ok {
