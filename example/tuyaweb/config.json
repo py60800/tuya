@@ -1,0 +1,10 @@
+[
+    {"gwId":"1582850884f3eb30128e",
+     "key":"xxxxxxxxxxxxxxxx",
+     "type":"Switch",
+     "name":"sw1" },
+    {"gwId":"86273325cc50e3c8fe2d",
+     "key":"xxxxxxxxxxxxxxxx",
+     "type":"Switch",
+     "name":"sw2" }
+]
