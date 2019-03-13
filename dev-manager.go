@@ -59,7 +59,7 @@ func newAppliance() *Appliance {
    d.cnxSignal = sync.NewCond(&d.cnxMutex)
    d.cnxStatus = 0
    d.Version = "3.1"
-   d.tcpChan = make(chan query)
+   d.tcpChan = make(chan query,2) // allow limited buffering
 
    return d
 }

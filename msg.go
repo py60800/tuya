@@ -11,6 +11,7 @@ import (
    "fmt"
    "log"
    "time"
+   "errors"
 )
 
 // create base messages
@@ -54,7 +55,11 @@ func (d *Appliance) SendEncryptedCommand(cmd int, jdata interface{}) error {
    b = append(b, cipherText...)
    d.mutex.RUnlock()
 
-   d.tcpChan <- query{cmd, b}
+   select {
+      case d.tcpChan <- query{cmd, b}:
+      default:
+         return errors.New("Device no ready")
+   }
    return nil
 }
 
@@ -101,6 +106,10 @@ func (d *Appliance) SendCommand(cmd int, jdata interface{}) error {
    if er1 != nil {
       return fmt.Errorf("Json Marshal(%v)", er1)
    }
-   d.tcpChan <- query{cmd, data}
+   select {
+      case d.tcpChan <- query{cmd, data}:
+      default:
+         return errors.New("Device no ready")
+   }
    return nil
 }
