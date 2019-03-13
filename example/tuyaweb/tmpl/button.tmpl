@@ -1,0 +1,14 @@
+
+<div class="checkbox checkbox-slider--c-weight checkbox-slider-lg" style="margin-left:50px">
+	<label>
+		<input  id="sw-{{.Name}}" {{.Checked}}  type="checkbox">
+                <span style="font-size:30px;margin-left:50px;">{{.Name}} </span>
+	</label>
+</div>
+<script>
+    $('#sw-{{.Name}}').click(function() {
+        $.get("set",
+             {'switch':'{{.Name}}',
+               set:$(this).prop('checked')});
+    });
+</script>
