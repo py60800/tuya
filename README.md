@@ -8,6 +8,14 @@ Support limited to protocol version 3.1
 
 Tested only with Neo power plugs
 
+## Standalone application
+
+Primary as an example and for my one use I have released a small web application that uses this API.
+
+The application can be installed on a Raspberry PI (for example).
+
+You will find it there : [https://github.com/py60800/tinytuya](https://github.com/py60800/tinytuya)
+
 ## Acknowledgements
 @codetheweb for reverse engineering the protocol
 
@@ -86,3 +94,7 @@ I have found many oddities in tuya protocol:
 - Protocol not properly layered (command outside payload)
 
 By many aspects, it seems that the protocol was designed for serial line communication.
+
+## Need help ?
+
+Open an issue!
