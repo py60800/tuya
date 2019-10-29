@@ -34,16 +34,20 @@ Import 'github.com/py60800/tuya`
 
 Create json configuration, thanks to keys and id collected previously (Use backquotes for multiline conf data or get it from a file)
 
-`   conf := `[`
-`    {"gwId":"1582850884f3eb30128e", 
-`     "key":"XXXXXXXXXXX", `
-`     "type":"Switch",`
-`     "name":"sw1" }, `
-`    {"gwId":"86273325cc50e3c8fe2d", `
-`     "key":"XXXXXXXXXXX", `
-`     "type":"Switch", `
-`     "name":"sw2" } `
-`     ]`
+```go
+conf := `[{"gwId":"1582850884f3eb30128e", "key":"XXXXXXX", "type":"Switch", "name":"s1"}]`
+//multiline data
+conf := `[
+ {"gwId":"1582850884f3eb30128e", 
+  "key":"XXXXXXXXXXX",
+  "type":"Switch",
+  "name":"sw1" },
+ {"gwId":"86273325cc50e3c8fe2d",
+  "key":"XXXXXXXXXXX",
+  "type":"Switch",
+  "name":"sw2" }
+  ]`
+```
 
 Create a device manager:
 ` dm := tuya.NewDeviceManager(conf)`
