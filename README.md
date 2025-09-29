@@ -1,7 +1,7 @@
 # tuya
 Golang API for tuya devices (or the like)
 
-Experimental code subject to major changes
+> **WARNING**: This project is not maintained as I switched my own environment to Zigbee devices, please consider any fork.
 
 ## Limits
 Support limited to protocol version 3.1
